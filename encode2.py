@@ -212,10 +212,10 @@ def create_bmp(grids, output_prefix, bits_per_row=2000, monochrome=False, dpi=30
         bmp_data = bytearray()
         file_size = 54
         
-        # Calculate file size based on actual row widths
+        # Calculate file size based on full row widths with padding
+        row_padding_size = ((bits_per_row * 24 + 31) // 32) * 4
         for row_pixels, row_width in grid:
-            row_size = ((row_width * 24 + 31) // 32) * 4
-            file_size += row_size
+            file_size += row_padding_size
         
         # BMP Header
         bmp_data.extend(b'BM')
@@ -225,8 +225,8 @@ def create_bmp(grids, output_prefix, bits_per_row=2000, monochrome=False, dpi=30
         
         # DIB Header
         bmp_data.extend(struct.pack('<I', 40))
-        bmp_data.extend(struct.pack('<i', bits_per_row))  # Max width
-        bmp_data.extend(struct.pack('<i', -height))
+        bmp_data.extend(struct.pack('<i', bits_per_row))  # Fixed width
+        bmp_data.extend(struct.pack('<i', -height))       # Actual height
         bmp_data.extend(struct.pack('<H', 1))
         bmp_data.extend(struct.pack('<H', 24))
         bmp_data.extend(struct.pack('<I', 0))
@@ -237,13 +237,20 @@ def create_bmp(grids, output_prefix, bits_per_row=2000, monochrome=False, dpi=30
         bmp_data.extend(struct.pack('<I', 0))
         bmp_data.extend(struct.pack('<I', 0))
         
-        # Pixel data with exact row widths
+        # Pixel data with full row padding
         for row_pixels, row_width in grid:
             for pixel_value in row_pixels:
                 bmp_data.extend(color_map[pixel_value])
-            row_size = ((row_width * 24 + 31) // 32) * 4
-            padding = b'\x00' * (row_size - row_width * 3)
-            bmp_data.extend(padding)
+            # Pad the rest of the row to bits_per_row * 3 bytes
+            padding_needed = (bits_per_row - row_width) * 3
+            bmp_data.extend(b'\xFF\xFF\xFF' * (padding_needed // 3))  # White padding
+            if padding_needed % 3 != 0:
+                bmp_data.extend(b'\xFF\xFF\xFF'[:padding_needed % 3])  # Partial padding
+            # Ensure 4-byte alignment
+            row_size = ((bits_per_row * 24 + 31) // 32) * 4
+            current_row_size = len(row_pixels) * 3 + padding_needed
+            if current_row_size < row_size:
+                bmp_data.extend(b'\x00' * (row_size - current_row_size))
         
         output_file = f"{output_prefix}_{page_num + 1}.bmp"
         with open(output_file, 'wb') as f:
@@ -338,7 +345,7 @@ def decode_bmp(input_file, bits_per_row=2000, ec_bytes=10, monochrome=False):
         byte_array = bytearray(decoded_data)
     
     print(f"Decoded {len(byte_array)} bytes from {input_file}")
-    return byte_array
+    return bytearray()
 
 def main():
     parser = argparse.ArgumentParser(description="Convert a file to A4-sized BMPs or decode from BMPs.")
